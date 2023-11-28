@@ -1,57 +1,100 @@
 package main
 
 import (
-	"bufio"
 	"encoding/csv"
 	"flag"
 	"fmt"
 	"os"
+	"strings"
+	"time"
 )
 
-var defaultFilename = "./problems.csv"
-
 func main() {
-	var correct int
 	// Define flag for csv filename
-	iFlag := flag.String("i", defaultFilename, "Input filename")
+	csvFilename := flag.String("csv", "problems.csv", "Input filename in the format of question,answer")
+
+	// Define flag for time limit in minutes
+	timeLimit := flag.Int("limit", 30, "Time limit for the quiz in seconds")
+
+	// Parse the flags
 	flag.Parse()
 
-	// Read the file stdin in readonly mode
-	file, err := os.Open(*iFlag)
+	// Read the fi stdin in readonly mode
+	fi, err := os.Open(*csvFilename)
+
+	// Check for open errors
 	if err != nil {
-		fmt.Printf("No file found at %v\n", *iFlag)
-		os.Exit(1)
+		exit(fmt.Sprintf("Failed to open the CSV file %s", *csvFilename))
 	}
 	// Close the file
-	defer file.Close()
+	defer fi.Close()
 
+	// Make csv reader
+	reader := csv.NewReader(fi)
+
+	// Read all the file contents
+	lines, err := reader.ReadAll()
+
+	// Check for read errors
 	if err != nil {
-		fmt.Println("Error opening file")
-		os.Exit(1)
+		exit(fmt.Sprintf("Failed to read the provided CSV file %s", *csvFilename))
 	}
 
-	// Read the file contents
-	reader := csv.NewReader(file)
+	// Map csv lines to a struct
+	problems := makeProblems(lines)
 
-	records, err := reader.ReadAll()
-	if err != nil {
-		fmt.Println("Error reading file")
-		os.Exit(1)
-	}
+	// Start the timer after the lines are parsed
+	timer := time.NewTimer(time.Duration(*timeLimit) * time.Second)
 
-	for index, record := range records {
-		// Prompt the question
-		fmt.Printf("Question #%v: %v\n", index, record[0])
+	var correctCount int
+	// Iterate over the problems and prompt the user for input
+problemLoop:
+	for i, p := range problems {
+		// Print question
+		fmt.Printf("Problem #%d: %s\n", i+1, p.question)
 
-		// ReadString() will block until the delimiter is entered
-		reader := bufio.NewReader(os.Stdin)
-		_, err := reader.ReadString('\n')
-		// Trim out the newlines
-		if err != nil {
-			os.Exit(1)
+		// Read channel for our answer
+		answerCh := make(chan string)
+
+		go func() {
+			// Create string pointer and pass into Scanf
+			var answer string
+			fmt.Scanf("%s\n", &answer)
+
+			// Sending answer var through channel
+			answerCh <- answer
+		}()
+		select {
+		case <-timer.C:
+			fmt.Println()
+			break problemLoop
+		case answer := <-answerCh:
+			if answer == p.answer {
+				correctCount++
+
+			}
 		}
-
-		correct++
 	}
-	fmt.Printf("Quiz complete. You answered %v out of %v correctly.", correct, len(records))
+	fmt.Printf("Quiz is complete. Your got %d out of %d correct.\n", correctCount, len(problems))
+}
+
+type problem struct {
+	question string
+	answer   string
+}
+
+func makeProblems(lines [][]string) []problem {
+	parsed := make([]problem, len(lines))
+	for i, line := range lines {
+		parsed[i] = problem{
+			question: line[0],
+			answer:   strings.TrimSpace(line[1]),
+		}
+	}
+	return parsed
+}
+
+func exit(msg string) {
+	fmt.Println(msg)
+	os.Exit(1)
 }
